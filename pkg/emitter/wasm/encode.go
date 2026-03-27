@@ -118,6 +118,55 @@ const (
 	OpcodeF32Sub = byte(0x93)
 	OpcodeF32Mul = byte(0x94)
 	OpcodeF32Div = byte(0x95)
+
+	// Global variable access
+	OpcodeGlobalGet = byte(0x23)
+	OpcodeGlobalSet = byte(0x24)
+
+	// Memory load instructions (each followed by memarg: align + offset uleb128)
+	OpcodeI32Load   = byte(0x28)
+	OpcodeI64Load   = byte(0x29)
+	OpcodeF32Load   = byte(0x2A)
+	OpcodeF64Load   = byte(0x2B)
+	OpcodeI32Load8S  = byte(0x2C)
+	OpcodeI32Load8U  = byte(0x2D)
+	OpcodeI32Load16S = byte(0x2E)
+	OpcodeI32Load16U = byte(0x2F)
+	OpcodeI64Load8S  = byte(0x30)
+	OpcodeI64Load8U  = byte(0x31)
+	OpcodeI64Load16S = byte(0x32)
+	OpcodeI64Load16U = byte(0x33)
+	OpcodeI64Load32S = byte(0x34)
+	OpcodeI64Load32U = byte(0x35)
+
+	// Memory store instructions (each followed by memarg: align + offset uleb128)
+	OpcodeI32Store   = byte(0x36)
+	OpcodeI64Store   = byte(0x37)
+	OpcodeF32Store   = byte(0x38)
+	OpcodeF64Store   = byte(0x39)
+	OpcodeI32Store8  = byte(0x3A)
+	OpcodeI32Store16 = byte(0x3B)
+	OpcodeI64Store8  = byte(0x3C)
+	OpcodeI64Store16 = byte(0x3D)
+	OpcodeI64Store32 = byte(0x3E)
+
+	// Type conversion opcodes
+	OpcodeI64ExtendI32S  = byte(0xAC)
+	OpcodeI64ExtendI32U  = byte(0xAD)
+	OpcodeI64TruncF32S   = byte(0xAE)
+	OpcodeI64TruncF32U   = byte(0xAF)
+	OpcodeI64TruncF64S   = byte(0xB0)
+	OpcodeI64TruncF64U   = byte(0xB1)
+	OpcodeF32ConvertI32S = byte(0xB2)
+	OpcodeF32ConvertI32U = byte(0xB3)
+	OpcodeF32ConvertI64S = byte(0xB4)
+	OpcodeF32ConvertI64U = byte(0xB5)
+	OpcodeF32DemoteF64   = byte(0xB6)
+	OpcodeF64ConvertI32S = byte(0xB7)
+	OpcodeF64ConvertI32U = byte(0xB8)
+	OpcodeF64ConvertI64S = byte(0xB9)
+	OpcodeF64ConvertI64U = byte(0xBA)
+	OpcodeF64PromoteF32  = byte(0xBB)
 )
 
 // Export descriptor kinds.
@@ -214,6 +263,72 @@ func funcBody(localTypes []byte, instructions []byte) []byte {
 	// Prefix with LEB128-encoded size.
 	sizePrefix := uleb128(uint32(len(content)))
 	return append(sizePrefix, content...)
+}
+
+// memarg encodes a WASM memory instruction argument: align + offset (both uleb128).
+// For natural alignment with no inline offset use memarg(0, 0).
+func memarg(align, offset uint32) []byte {
+	return append(uleb128(align), uleb128(offset)...)
+}
+
+// memorySection encodes a WASM Memory section with a single memory (no max limit).
+func memorySection(minPages uint32) []byte {
+	body := []byte{0x01}        // vec of 1 memory
+	body = append(body, 0x00)   // limit kind: min only (no max)
+	body = append(body, uleb128(minPages)...)
+	return section(sectionMemory, body)
+}
+
+// globalSection encodes a WASM Global section with a single mutable i32 global
+// initialized to initValue. Used for the __heap_ptr bump allocator pointer.
+func globalSection(initValue int32) []byte {
+	var body []byte
+	body = append(body, 0x01)                         // vec of 1 global
+	body = append(body, ValTypeI32, 0x01)              // globaltype: i32, mutable
+	body = append(body, OpcodeI32Const)               // init expr: i32.const
+	body = append(body, sleb128(int64(initValue))...) // initValue
+	body = append(body, OpcodeEnd)                    // end init expr
+	return section(sectionGlobal, body)
+}
+
+// allocFuncBody returns the encoded body of the __alloc(size i32) → i32 function.
+// It implements a simple bump allocator:
+//
+//	addr = heap_ptr
+//	heap_ptr = (heap_ptr + size + 7) & ^7   // align to 8 bytes
+//	return addr
+//
+// The function body is length-prefixed (ready for the Code section vec entry).
+func allocFuncBody() []byte {
+	var body []byte
+	// 1 local declaration: 1 × i32 (the saved addr, local index 1; param is local 0)
+	body = append(body, 0x01, 0x01, ValTypeI32)
+	// global.get 0   → old heap_ptr (= return address)
+	body = append(body, OpcodeGlobalGet, 0x00)
+	// local.tee 1    → save addr AND keep on stack
+	body = append(body, OpcodeLocalTee, 0x01)
+	// local.get 0    → size param
+	body = append(body, OpcodeLocalGet, 0x00)
+	// i32.add        → heap_ptr + size
+	body = append(body, OpcodeI32Add)
+	// i32.const 7
+	body = append(body, OpcodeI32Const)
+	body = append(body, sleb128(7)...)
+	// i32.add        → + 7
+	body = append(body, OpcodeI32Add)
+	// i32.const -8   → alignment mask
+	body = append(body, OpcodeI32Const)
+	body = append(body, sleb128(-8)...)
+	// i32.and        → align to 8 bytes
+	body = append(body, OpcodeI32And)
+	// global.set 0   → update heap_ptr
+	body = append(body, OpcodeGlobalSet, 0x00)
+	// local.get 1    → return saved addr
+	body = append(body, OpcodeLocalGet, 0x01)
+	// end
+	body = append(body, OpcodeEnd)
+	// Prefix with size (this is a Code section entry, not a funcBody call)
+	return append(uleb128(uint32(len(body))), body...)
 }
 
 // encodeLocalDecls converts a flat list of ValType bytes into the WASM

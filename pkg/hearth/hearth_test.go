@@ -190,6 +190,77 @@ func TestBurnSum(t *testing.T) {
 	}
 }
 
+func TestBurnFib(t *testing.T) {
+	tests := []struct{ n, want int64 }{
+		{0, 0},
+		{1, 1},
+		{5, 5},
+		{10, 55},
+	}
+	for _, tc := range tests {
+		got, _ := burnFixture(t, "../../testdata/fib", "Fib", []uint64{uint64(tc.n)})
+		if got != tc.want {
+			t.Errorf("Fib(%d) = %d, want %d", tc.n, got, tc.want)
+		}
+	}
+}
+
+func TestBurnSumLoop(t *testing.T) {
+	tests := []struct{ n, want int64 }{
+		{0, 0},
+		{1, 0},
+		{5, 10},
+		{10, 45},
+	}
+	for _, tc := range tests {
+		got, _ := burnFixture(t, "../../testdata/sumloop", "SumN", []uint64{uint64(tc.n)})
+		if got != tc.want {
+			t.Errorf("SumN(%d) = %d, want %d", tc.n, got, tc.want)
+		}
+	}
+}
+
+func TestBurnPoint(t *testing.T) {
+	got, _ := burnFixture(t, "../../testdata/point", "SumFields", []uint64{})
+	if got != 7 {
+		t.Errorf("SumFields() = %d, want 7", got)
+	}
+}
+
+func TestBurnDivMod(t *testing.T) {
+	ctx := context.Background()
+
+	lp, err := loader.LoadDir("../../testdata/divmod")
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+	a := analyzer.New()
+	walker.New(a).WalkPackage(lp.MainPkg) //nolint:errcheck
+	m := a.Manifest()
+
+	e := wasm.NewEmitter()
+	e.AssignPackageIndices(lp.MainPkg)
+	walker.New(e).WalkPackage(lp.MainPkg) //nolint:errcheck
+	wasmBytes, err := e.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes(): %v", err)
+	}
+
+	h := New()
+	results, err := h.Burn(ctx, wasmBytes, m, "DivMod", []uint64{uint64(10), uint64(3)})
+	if err != nil {
+		t.Fatalf("Burn: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("DivMod returned %d results, want 2", len(results))
+	}
+	q, r := int64(results[0]), int64(results[1])
+	if q != 3 || r != 1 {
+		t.Errorf("DivMod(10, 3) = (%d, %d), want (3, 1)", q, r)
+	}
+	t.Logf("DivMod(10, 3) = (%d, %d) ✓", q, r)
+}
+
 func TestCanBurn_ManifestChecks(t *testing.T) {
 	h := NewWithCaps(Capabilities{MaxMemoryPages: 10})
 

@@ -173,6 +173,110 @@ func TestEmitter_Sum(t *testing.T) {
 	}
 }
 
+func TestEmitter_SumLoop(t *testing.T) {
+	lp, err := loader.LoadDir("../../../testdata/sumloop")
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	e := NewEmitter()
+	e.AssignPackageIndices(lp.MainPkg)
+	w := walker.New(e)
+	if err := w.WalkPackage(lp.MainPkg); err != nil {
+		t.Fatalf("WalkPackage: %v", err)
+	}
+	wasmBytes, err := e.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes(): %v", err)
+	}
+	t.Logf("SumLoop WASM (%d bytes): %x", len(wasmBytes), wasmBytes)
+
+	tests := []struct{ n, want int64 }{
+		{0, 0},
+		{1, 0},
+		{5, 10},
+		{10, 45},
+	}
+	for _, tc := range tests {
+		got := int64(execWASM(t, wasmBytes, "SumN", uint64(tc.n)))
+		if got != tc.want {
+			t.Errorf("SumN(%d) = %d, want %d", tc.n, got, tc.want)
+		}
+	}
+}
+
+func TestEmitter_Point(t *testing.T) {
+	lp, err := loader.LoadDir("../../../testdata/point")
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	e := NewEmitter()
+	e.AssignPackageIndices(lp.MainPkg)
+	w := walker.New(e)
+	if err := w.WalkPackage(lp.MainPkg); err != nil {
+		t.Fatalf("WalkPackage: %v", err)
+	}
+	wasmBytes, err := e.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes(): %v", err)
+	}
+	t.Logf("Point WASM (%d bytes): %x", len(wasmBytes), wasmBytes)
+
+	got := int64(execWASM(t, wasmBytes, "SumFields"))
+	if got != 7 {
+		t.Errorf("SumFields() = %d, want 7", got)
+	}
+}
+
+func TestEmitter_DivMod(t *testing.T) {
+	lp, err := loader.LoadDir("../../../testdata/divmod")
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	e := NewEmitter()
+	e.AssignPackageIndices(lp.MainPkg)
+	w := walker.New(e)
+	if err := w.WalkPackage(lp.MainPkg); err != nil {
+		t.Fatalf("WalkPackage: %v", err)
+	}
+	wasmBytes, err := e.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes(): %v", err)
+	}
+	t.Logf("DivMod WASM (%d bytes): %x", len(wasmBytes), wasmBytes)
+
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	defer rt.Close(ctx)
+	compiled, err := rt.CompileModule(ctx, wasmBytes)
+	if err != nil {
+		t.Fatalf("CompileModule: %v", err)
+	}
+	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName("test"))
+	if err != nil {
+		t.Fatalf("InstantiateModule: %v", err)
+	}
+	defer mod.Close(ctx)
+	f := mod.ExportedFunction("DivMod")
+	if f == nil {
+		t.Fatal("exported function DivMod not found")
+	}
+	results, err := f.Call(ctx, uint64(10), uint64(3))
+	if err != nil {
+		t.Fatalf("Call DivMod(10, 3): %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("DivMod returned %d results, want 2", len(results))
+	}
+	q, r := int64(results[0]), int64(results[1])
+	if q != 3 || r != 1 {
+		t.Errorf("DivMod(10, 3) = (%d, %d), want (3, 1)", q, r)
+	}
+	t.Logf("DivMod(10, 3) = (%d, %d) ✓", q, r)
+}
+
 func TestEncodeLocalDecls_Grouping(t *testing.T) {
 	// Two i64 locals should be grouped into a single entry: (2, i64)
 	localTypes := []byte{ValTypeI64, ValTypeI64}
