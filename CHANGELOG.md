@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-26
+
+### Added
+- `pkg/runtime`: native WASM interpreter for pure-compute embers — zero CGO, zero external deps
+  - `module.go`: `Compile([]byte) (*Module, error)` — magic check, section parser, LEB128, pre-decoded `[]Instr` per function body with branch targets resolved in a single O(n) pass (`resolvePartners`)
+  - `interp.go`: `Module.Instantiate() *Instance`; `Instance.Call(name string, args ...uint64) ([]uint64, error)`; flat `[]frame` call stack for recursion; uint64 value stack; full dispatch for all opcodes emitted by `pkg/emitter/wasm`
+  - `memory.go`: bounds-checked little-endian load/store for all WASM memory variants; `__heap_ptr` (global[0]) managed by `__alloc` body via generic call dispatch
+  - `runtime_test.go`: unit tests for decoder, resolver, and end-to-end calls against all Phase 0–2 fixtures
+
+### Changed
+- `pkg/hearth/hearth.go`: `Burn()` routes pure-compute embers through `pkg/runtime`; non-pure-compute returns `ErrNotImplemented`
+- `pkg/emitter/wasm/emitter_test.go`: `execWASM` helper rewritten to use `pkg/runtime` (wazero removed)
+
+### Removed
+- `github.com/tetratelabs/wazero` — removed from `go.mod` and `go.sum`
+
 ## [0.3.0] - 2026-03-26
 
 ### Added
@@ -50,7 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cmd/ember`: CLI with `ember build` subcommand producing `.wasm` + `.intent` files
 - End-to-end pipeline: `Add(3, 4) int → 7` in 47 bytes of WASM, 22 tests passing
 
-[Unreleased]: https://github.com/scttfrdmn/ember/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/scttfrdmn/ember/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/scttfrdmn/ember/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/scttfrdmn/ember/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/scttfrdmn/ember/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/scttfrdmn/ember/releases/tag/v0.1.0

@@ -6,8 +6,9 @@
 // the minimal execution surface declared by the manifest, runs the code,
 // returns the result, and tears down.
 //
-// Phase 0: the execution surface is backed by wazero (pure Go WASM
-// runtime, Apache 2.0). Phase 3 will synthesize native code directly.
+// Phase 3: pure-compute embers execute via pkg/runtime — a purpose-built
+// Go WASM interpreter with zero external dependencies. I/O-capable embers
+// are deferred to Phase 5.
 package hearth
 
 import (
@@ -15,9 +16,8 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/tetratelabs/wazero"
-
 	"github.com/scttfrdmn/ember/core/intent"
+	emberruntime "github.com/scttfrdmn/ember/pkg/runtime"
 )
 
 // Capabilities describes what a hearth can provide.
@@ -88,54 +88,26 @@ func (h *Hearth) CanBurn(m *intent.Manifest) bool {
 // args and return values are uint64 (the WASM representation for both
 // i32 and i64 values). For int results, cast the uint64 back to int64.
 //
-// Phase 0 uses wazero's interpreter engine (portable, zero CGO).
-// Phase 3 will use a JIT-compiled native engine shaped by the manifest.
-func (h *Hearth) Burn(ctx context.Context, code []byte, m *intent.Manifest, fn string, args []uint64) ([]uint64, error) {
+// Phase 3: pure-compute embers run on pkg/runtime (zero external deps).
+// I/O-capable embers return ErrNotImplemented (deferred to Phase 5).
+func (h *Hearth) Burn(_ context.Context, code []byte, m *intent.Manifest, fn string, args []uint64) ([]uint64, error) {
 	if !h.CanBurn(m) {
 		return nil, fmt.Errorf("hearth cannot satisfy ember intent manifest")
 	}
+	if !m.IsPureCompute() {
+		return nil, fmt.Errorf("%w", emberruntime.ErrNotImplemented)
+	}
 
-	// Synthesize the execution surface from the manifest.
-	// Phase 0: configure wazero with manifest-derived constraints.
-	rtCfg := wazero.NewRuntimeConfig()
-
-	// Use interpreter engine in Phase 0 (portable, no CGO).
-	// The interpreter is slower but correct on all platforms.
-	// Phase 3 switches to wazevo AOT compilation when the manifest
-	// confirms the ember is safe to JIT.
-	rtCfg = rtCfg.WithCompilationCache(wazero.NewCompilationCache())
-
-	rt := wazero.NewRuntimeWithConfig(ctx, rtCfg)
-	defer rt.Close(ctx)
-
-	// Compile the WASM module.
-	compiled, err := rt.CompileModule(ctx, code)
+	mod, err := emberruntime.Compile(code)
 	if err != nil {
 		return nil, fmt.Errorf("compile WASM: %w", err)
 	}
 
-	// Instantiate with manifest-constrained configuration.
-	modCfg := wazero.NewModuleConfig().
-		WithName("ember")
-
-	mod, err := rt.InstantiateModule(ctx, compiled, modCfg)
+	inst := mod.Instantiate()
+	results, err := inst.Call(fn, args...)
 	if err != nil {
-		return nil, fmt.Errorf("instantiate WASM module: %w", err)
+		return nil, fmt.Errorf("ember execution: %w", err)
 	}
-	defer mod.Close(ctx)
-
-	// Look up the exported function.
-	f := mod.ExportedFunction(fn)
-	if f == nil {
-		return nil, fmt.Errorf("function %q not exported from WASM module", fn)
-	}
-
-	// Execute. The surface tears down via deferred Close calls above.
-	results, err := f.Call(ctx, args...)
-	if err != nil {
-		return nil, fmt.Errorf("WASM execution: %w", err)
-	}
-
 	return results, nil
 }
 
@@ -151,4 +123,3 @@ func detectCapabilities() Capabilities {
 		Arch:       runtime.GOARCH,
 	}
 }
-

@@ -1,13 +1,11 @@
 package wasm
 
 import (
-	"context"
 	"testing"
-
-	"github.com/tetratelabs/wazero"
 
 	"github.com/scttfrdmn/ember/core/ssa/loader"
 	"github.com/scttfrdmn/ember/core/ssa/walker"
+	emberruntime "github.com/scttfrdmn/ember/pkg/runtime"
 )
 
 func TestEmitter_Add_ProducesValidWASM(t *testing.T) {
@@ -87,27 +85,16 @@ func TestLEB128_Encoding(t *testing.T) {
 	}
 }
 
-// execWASM is a test helper that compiles and runs a WASM binary,
+// execWASM is a test helper that compiles and runs a WASM binary via pkg/runtime,
 // calling the named function with args and returning the first result.
 func execWASM(t *testing.T, wasmBytes []byte, fn string, args ...uint64) uint64 {
 	t.Helper()
-	ctx := context.Background()
-	rt := wazero.NewRuntime(ctx)
-	defer rt.Close(ctx)
-	compiled, err := rt.CompileModule(ctx, wasmBytes)
+	mod, err := emberruntime.Compile(wasmBytes)
 	if err != nil {
-		t.Fatalf("CompileModule: %v", err)
+		t.Fatalf("runtime.Compile: %v", err)
 	}
-	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName("test"))
-	if err != nil {
-		t.Fatalf("InstantiateModule: %v", err)
-	}
-	defer mod.Close(ctx)
-	f := mod.ExportedFunction(fn)
-	if f == nil {
-		t.Fatalf("exported function %q not found", fn)
-	}
-	results, err := f.Call(ctx, args...)
+	inst := mod.Instantiate()
+	results, err := inst.Call(fn, args...)
 	if err != nil {
 		t.Fatalf("Call %s(%v): %v", fn, args, err)
 	}
@@ -247,23 +234,12 @@ func TestEmitter_DivMod(t *testing.T) {
 	}
 	t.Logf("DivMod WASM (%d bytes): %x", len(wasmBytes), wasmBytes)
 
-	ctx := context.Background()
-	rt := wazero.NewRuntime(ctx)
-	defer rt.Close(ctx)
-	compiled, err := rt.CompileModule(ctx, wasmBytes)
+	mod, err := emberruntime.Compile(wasmBytes)
 	if err != nil {
-		t.Fatalf("CompileModule: %v", err)
+		t.Fatalf("runtime.Compile: %v", err)
 	}
-	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName("test"))
-	if err != nil {
-		t.Fatalf("InstantiateModule: %v", err)
-	}
-	defer mod.Close(ctx)
-	f := mod.ExportedFunction("DivMod")
-	if f == nil {
-		t.Fatal("exported function DivMod not found")
-	}
-	results, err := f.Call(ctx, uint64(10), uint64(3))
+	inst := mod.Instantiate()
+	results, err := inst.Call("DivMod", uint64(10), uint64(3))
 	if err != nil {
 		t.Fatalf("Call DivMod(10, 3): %v", err)
 	}
