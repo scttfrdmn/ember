@@ -1,0 +1,7 @@
+# Compiled ember artifacts
+*.wasm
+*.intent
+/ember
+
+# Editor
+.DS_Store
