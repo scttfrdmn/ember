@@ -9,6 +9,24 @@ import (
 	"github.com/scttfrdmn/ember/core/ssa/loader"
 )
 
+// blockOrderVisitor records the block indices in EnterBlock call order.
+type blockOrderVisitor struct {
+	BaseVisitor
+	funcName   string
+	blockOrder []int
+}
+
+func (v *blockOrderVisitor) EnterFunction(fn *ssa.Function) error {
+	v.funcName = fn.Name()
+	v.blockOrder = nil
+	return nil
+}
+
+func (v *blockOrderVisitor) EnterBlock(block *ssa.BasicBlock) error {
+	v.blockOrder = append(v.blockOrder, block.Index)
+	return nil
+}
+
 // countingVisitor counts calls to each Visitor method.
 type countingVisitor struct {
 	BaseVisitor
@@ -98,4 +116,61 @@ type errorOnFirstInstr struct {
 func (v *errorOnFirstInstr) VisitInstruction(_ ssa.Instruction) error {
 	*v.called++
 	return v.sentinel
+}
+
+func TestWalkFunction_DomPreorder(t *testing.T) {
+	lp, err := loader.LoadDir("../../../testdata/max")
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	bv := &blockOrderVisitor{}
+	w := New(bv)
+	if err := w.WalkPackage(lp.MainPkg); err != nil {
+		t.Fatalf("WalkPackage: %v", err)
+	}
+
+	// Entry block (index 0) must always be visited first.
+	if len(bv.blockOrder) == 0 {
+		t.Fatal("no blocks visited")
+	}
+	if bv.blockOrder[0] != 0 {
+		t.Errorf("first visited block index = %d, want 0 (entry)", bv.blockOrder[0])
+	}
+	// Max has 3 blocks: entry (if), true branch, false branch.
+	if len(bv.blockOrder) < 2 {
+		t.Errorf("expected at least 2 blocks for Max, got %d", len(bv.blockOrder))
+	}
+}
+
+func TestWalkReachable_Sum(t *testing.T) {
+	lp, err := loader.LoadDir("../../../testdata/sum")
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	sumFn, ok := lp.MainPkg.Members["Sum"].(*ssa.Function)
+	if !ok {
+		t.Fatal("Sum not found in package")
+	}
+
+	cv := &countingVisitor{}
+	w := New(cv)
+	if err := w.WalkReachable(lp.MainPkg, []*ssa.Function{sumFn}); err != nil {
+		t.Fatalf("WalkReachable: %v", err)
+	}
+
+	// Should visit both Sum and add.
+	if cv.enterFunc < 2 {
+		t.Errorf("WalkReachable visited %d functions, want >= 2 (Sum + add)", cv.enterFunc)
+	}
+	found := make(map[string]bool)
+	for _, name := range cv.funcNames {
+		found[name] = true
+	}
+	for _, want := range []string{"Sum", "add"} {
+		if !found[want] {
+			t.Errorf("WalkReachable did not visit function %q; visited: %v", want, cv.funcNames)
+		}
+	}
 }

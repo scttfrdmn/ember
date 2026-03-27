@@ -25,7 +25,7 @@ const (
 	ValTypeF64 = byte(0x7C)
 )
 
-// WASM instruction opcodes used in Phase 0.
+// WASM instruction opcodes.
 // (WebAssembly Core Spec §5.4)
 const (
 	OpcodeUnreachable = byte(0x00)
@@ -35,6 +35,46 @@ const (
 	OpcodeLocalGet    = byte(0x20)
 	OpcodeLocalSet    = byte(0x21)
 	OpcodeLocalTee    = byte(0x22)
+
+	// Control flow (Phase 1)
+	OpcodeBlock = byte(0x02)
+	OpcodeLoop  = byte(0x03)
+	OpcodeIf    = byte(0x04)
+	OpcodeElse  = byte(0x05)
+	OpcodeBr    = byte(0x0C)
+	OpcodeBrIf  = byte(0x0D)
+	OpcodeCall  = byte(0x10)
+
+	// Block types (empty = void, i32, i64)
+	BlockTypeEmpty = byte(0x40)
+	BlockTypeI32   = byte(0x7F)
+	BlockTypeI64   = byte(0x7E)
+
+	// Constants
+	OpcodeI32Const = byte(0x41)
+	OpcodeI64Const = byte(0x42)
+
+	// Type conversion
+	OpcodeI32WrapI64 = byte(0xA7)
+
+	// Boolean operations
+	OpcodeI32Eqz = byte(0x45)
+
+	// i32 comparisons (produce i32: 0 or 1)
+	OpcodeI32Eq  = byte(0x46)
+	OpcodeI32Ne  = byte(0x47)
+	OpcodeI32LtS = byte(0x48)
+	OpcodeI32GtS = byte(0x4A)
+	OpcodeI32LeS = byte(0x4C)
+	OpcodeI32GeS = byte(0x4E)
+
+	// i64 comparisons (produce i32: 0 or 1)
+	OpcodeI64Eq  = byte(0x51)
+	OpcodeI64Ne  = byte(0x52)
+	OpcodeI64LtS = byte(0x53)
+	OpcodeI64GtS = byte(0x55)
+	OpcodeI64LeS = byte(0x57)
+	OpcodeI64GeS = byte(0x59)
 
 	// i32 arithmetic
 	OpcodeI32Clz  = byte(0x67)
@@ -90,6 +130,21 @@ const (
 
 // wasmMagic is the 8-byte module preamble: magic number + version 1.
 var wasmMagic = []byte{0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00}
+
+// sleb128 encodes v as a signed LEB128 byte sequence.
+func sleb128(v int64) []byte {
+	var buf []byte
+	for {
+		b := byte(v & 0x7F)
+		v >>= 7
+		if (v == 0 && b&0x40 == 0) || (v == -1 && b&0x40 != 0) {
+			buf = append(buf, b)
+			break
+		}
+		buf = append(buf, b|0x80)
+	}
+	return buf
+}
 
 // uleb128 encodes v as an unsigned LEB128 byte sequence.
 func uleb128(v uint32) []byte {

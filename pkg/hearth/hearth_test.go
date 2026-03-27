@@ -113,6 +113,83 @@ func TestBurnAdd_LargerValues(t *testing.T) {
 	}
 }
 
+// burnFixture is a test helper that loads, analyzes, emits, and burns a fixture.
+func burnFixture(t *testing.T, dir, fn string, args []uint64) (int64, *intent.Manifest) {
+	t.Helper()
+	ctx := context.Background()
+
+	lp, err := loader.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir(%s): %v", dir, err)
+	}
+
+	a := analyzer.New()
+	if err := walker.New(a).WalkPackage(lp.MainPkg); err != nil {
+		t.Fatalf("WalkPackage (analyzer): %v", err)
+	}
+	m := a.Manifest()
+
+	e := wasm.NewEmitter()
+	e.AssignPackageIndices(lp.MainPkg)
+	if err := walker.New(e).WalkPackage(lp.MainPkg); err != nil {
+		t.Fatalf("WalkPackage (emitter): %v", err)
+	}
+	wasmBytes, err := e.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes(): %v", err)
+	}
+
+	h := New()
+	results, err := h.Burn(ctx, wasmBytes, m, fn, args)
+	if err != nil {
+		t.Fatalf("Burn(%s, %v): %v", fn, args, err)
+	}
+	if len(results) == 0 {
+		return 0, m
+	}
+	return int64(results[0]), m
+}
+
+func TestBurnMax(t *testing.T) {
+	tests := []struct{ a, b, want int64 }{
+		{3, 1, 3},
+		{1, 3, 3},
+		{5, 5, 5},
+		{-2, -1, -1},
+	}
+	for _, tc := range tests {
+		got, _ := burnFixture(t, "../../testdata/max", "Max", []uint64{uint64(tc.a), uint64(tc.b)})
+		if got != tc.want {
+			t.Errorf("Max(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestBurnAbs(t *testing.T) {
+	tests := []struct{ x, want int64 }{
+		{5, 5},
+		{-5, 5},
+		{0, 0},
+		{-100, 100},
+	}
+	for _, tc := range tests {
+		got, _ := burnFixture(t, "../../testdata/abs", "Abs", []uint64{uint64(tc.x)})
+		if got != tc.want {
+			t.Errorf("Abs(%d) = %d, want %d", tc.x, got, tc.want)
+		}
+	}
+}
+
+func TestBurnSum(t *testing.T) {
+	got, m := burnFixture(t, "../../testdata/sum", "Sum", []uint64{1, 2, 3})
+	if got != 6 {
+		t.Errorf("Sum(1, 2, 3) = %d, want 6", got)
+	}
+	if !m.IsPureCompute() {
+		t.Errorf("Sum should be pure compute; manifest: %+v", m)
+	}
+}
+
 func TestCanBurn_ManifestChecks(t *testing.T) {
 	h := NewWithCaps(Capabilities{MaxMemoryPages: 10})
 

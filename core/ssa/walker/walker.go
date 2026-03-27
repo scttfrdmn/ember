@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"golang.org/x/tools/go/callgraph/rta"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -13,9 +14,9 @@ import (
 // Walk order:
 //   - Package members are visited in alphabetical order (deterministic).
 //   - Each non-synthetic function with a body is visited.
-//   - Within a function, basic blocks are visited in fn.Blocks slice order.
-//     TODO(phase1): switch to fn.DomPreorder() for dominance-order traversal
-//     once Phi node support is added to the emitter.
+//   - Within a function, basic blocks are visited in dominance-order
+//     (fn.DomPreorder()), ensuring each block's dominators are visited
+//     before their dominated successors.
 //   - Within a block, instructions are visited in order.
 type Walker struct {
 	v Visitor
@@ -28,9 +29,6 @@ func New(v Visitor) *Walker {
 
 // WalkPackage visits all exported, non-synthetic functions in pkg that
 // have a body (Blocks != nil). Members are visited alphabetically.
-//
-// Call graph traversal (following callees into other packages) is
-// deferred to Phase 1.
 func (w *Walker) WalkPackage(pkg *ssa.Package) error {
 	if err := w.v.EnterPackage(pkg); err != nil {
 		return err
@@ -65,15 +63,40 @@ func (w *Walker) WalkPackage(pkg *ssa.Package) error {
 	return w.v.ExitPackage(pkg)
 }
 
+// WalkReachable visits all functions reachable from mainFns via RTA
+// call graph analysis, including functions in imported packages.
+// Functions are visited in deterministic order (sorted by RelString).
+func (w *Walker) WalkReachable(pkg *ssa.Package, mainFns []*ssa.Function) error {
+	result := rta.Analyze(mainFns, true)
+	var fns []*ssa.Function
+	for fn := range result.CallGraph.Nodes {
+		if fn == nil || fn.Blocks == nil || fn.Synthetic != "" {
+			continue
+		}
+		fns = append(fns, fn)
+	}
+	sort.Slice(fns, func(i, j int) bool {
+		return fns[i].RelString(nil) < fns[j].RelString(nil)
+	})
+
+	if err := w.v.EnterPackage(pkg); err != nil {
+		return err
+	}
+	for _, fn := range fns {
+		if err := w.WalkFunction(fn); err != nil {
+			return fmt.Errorf("function %s: %w", fn.Name(), err)
+		}
+	}
+	return w.v.ExitPackage(pkg)
+}
+
 // WalkFunction visits a single SSA function: EnterFunction, then all
-// basic blocks in order, then ExitFunction.
+// basic blocks in dominance-order (fn.DomPreorder()), then ExitFunction.
 func (w *Walker) WalkFunction(fn *ssa.Function) error {
 	if err := w.v.EnterFunction(fn); err != nil {
 		return err
 	}
-	// TODO(phase1): use fn.DomPreorder() for dominance-order traversal
-	// once the emitter supports Phi nodes and control flow.
-	for _, block := range fn.Blocks {
+	for _, block := range fn.DomPreorder() {
 		if err := w.WalkBlock(block); err != nil {
 			return err
 		}

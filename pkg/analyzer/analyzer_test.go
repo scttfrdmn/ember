@@ -52,11 +52,13 @@ func TestAnalyzer_Add(t *testing.T) {
 		t.Errorf("InstructionCount = %d, want >= 2", m.InstructionCount)
 	}
 
-	// RuntimeStrips should contain the standard pure-compute set.
+	// RuntimeStrips should contain the standard pure-compute set (now 7 strips with I/O).
 	wantStrips := []string{
 		string(intent.StripChannels),
 		string(intent.StripDefer),
+		string(intent.StripFileIO),
 		string(intent.StripGC),
+		string(intent.StripNetIO),
 		string(intent.StripReflection),
 		string(intent.StripScheduler),
 	}

@@ -7,7 +7,7 @@ import (
 func TestComputeRuntimeStrips_AllFalse(t *testing.T) {
 	m := &Manifest{}
 	m.ComputeRuntimeStrips()
-	want := []string{"channels", "defer", "gc", "reflection", "scheduler"}
+	want := []string{"channels", "defer", "file_io", "gc", "net_io", "reflection", "scheduler"}
 	if len(m.RuntimeStrips) != len(want) {
 		t.Fatalf("got %v, want %v", m.RuntimeStrips, want)
 	}

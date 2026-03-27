@@ -61,6 +61,7 @@ func runBuild(args []string) error {
 
 	// Phase 2: emit WASM.
 	e := wasm.NewEmitter()
+	e.AssignPackageIndices(lp.MainPkg) // pre-assign indices for intra-package calls
 	w2 := walker.New(e)
 	if err := w2.WalkPackage(lp.MainPkg); err != nil {
 		return fmt.Errorf("emit WASM: %w", err)

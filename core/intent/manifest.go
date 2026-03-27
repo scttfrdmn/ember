@@ -63,6 +63,15 @@ type Manifest struct {
 	// type metadata (MakeInterface / TypeAssert).
 	HasReflection bool `json:"has_reflection"`
 
+	// HasNetIO is true if the code calls into net or net/* packages.
+	HasNetIO bool `json:"has_net_io"`
+
+	// HasFileIO is true if the code calls into os or io/fs packages.
+	HasFileIO bool `json:"has_file_io"`
+
+	// HasProcessIO is true if the code calls into os/exec or syscall packages.
+	HasProcessIO bool `json:"has_process_io"`
+
 	// Capabilities is the set of external resources the ember requires.
 	// Empty for pure computational embers (the common case in Phase 0).
 	Capabilities []Capability `json:"capabilities,omitempty"`
@@ -95,12 +104,18 @@ func (m *Manifest) ComputeRuntimeStrips() {
 	if !m.HasReflection {
 		strips = append(strips, string(StripReflection))
 	}
+	if !m.HasNetIO {
+		strips = append(strips, string(StripNetIO))
+	}
+	if !m.HasFileIO {
+		strips = append(strips, string(StripFileIO))
+	}
 	sort.Strings(strips)
 	m.RuntimeStrips = strips
 }
 
 // IsPureCompute reports whether this ember is a pure computation:
-// no goroutines, no GC, no channels, no defer, no reflection, no capabilities.
+// no goroutines, no GC, no channels, no defer, no reflection, no I/O, no capabilities.
 // Pure compute embers are the simplest execution surface target.
 func (m *Manifest) IsPureCompute() bool {
 	return !m.HasGoroutines &&
@@ -109,5 +124,8 @@ func (m *Manifest) IsPureCompute() bool {
 		!m.HasDefer &&
 		!m.HasPanic &&
 		!m.HasReflection &&
+		!m.HasNetIO &&
+		!m.HasFileIO &&
+		!m.HasProcessIO &&
 		len(m.Capabilities) == 0
 }

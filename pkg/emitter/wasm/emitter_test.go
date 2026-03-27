@@ -1,7 +1,10 @@
 package wasm
 
 import (
+	"context"
 	"testing"
+
+	"github.com/tetratelabs/wazero"
 
 	"github.com/scttfrdmn/ember/core/ssa/loader"
 	"github.com/scttfrdmn/ember/core/ssa/walker"
@@ -81,6 +84,92 @@ func TestLEB128_Encoding(t *testing.T) {
 				t.Errorf("uleb128(%d)[%d] = 0x%02X, want 0x%02X", tc.v, i, got[i], b)
 			}
 		}
+	}
+}
+
+// execWASM is a test helper that compiles and runs a WASM binary,
+// calling the named function with args and returning the first result.
+func execWASM(t *testing.T, wasmBytes []byte, fn string, args ...uint64) uint64 {
+	t.Helper()
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	defer rt.Close(ctx)
+	compiled, err := rt.CompileModule(ctx, wasmBytes)
+	if err != nil {
+		t.Fatalf("CompileModule: %v", err)
+	}
+	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName("test"))
+	if err != nil {
+		t.Fatalf("InstantiateModule: %v", err)
+	}
+	defer mod.Close(ctx)
+	f := mod.ExportedFunction(fn)
+	if f == nil {
+		t.Fatalf("exported function %q not found", fn)
+	}
+	results, err := f.Call(ctx, args...)
+	if err != nil {
+		t.Fatalf("Call %s(%v): %v", fn, args, err)
+	}
+	if len(results) == 0 {
+		return 0
+	}
+	return results[0]
+}
+
+func TestEmitter_Max(t *testing.T) {
+	lp, err := loader.LoadDir("../../../testdata/max")
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	e := NewEmitter()
+	e.AssignPackageIndices(lp.MainPkg)
+	w := walker.New(e)
+	if err := w.WalkPackage(lp.MainPkg); err != nil {
+		t.Fatalf("WalkPackage: %v", err)
+	}
+	wasmBytes, err := e.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes(): %v", err)
+	}
+	t.Logf("Max WASM (%d bytes): %x", len(wasmBytes), wasmBytes)
+
+	tests := []struct{ a, b, want int64 }{
+		{3, 1, 3},
+		{1, 3, 3},
+		{5, 5, 5},
+		{-1, 0, 0},
+	}
+	for _, tc := range tests {
+		got := int64(execWASM(t, wasmBytes, "Max", uint64(tc.a), uint64(tc.b)))
+		if got != tc.want {
+			t.Errorf("Max(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestEmitter_Sum(t *testing.T) {
+	lp, err := loader.LoadDir("../../../testdata/sum")
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	e := NewEmitter()
+	e.AssignPackageIndices(lp.MainPkg)
+	w := walker.New(e)
+	if err := w.WalkPackage(lp.MainPkg); err != nil {
+		t.Fatalf("WalkPackage: %v", err)
+	}
+	wasmBytes, err := e.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes(): %v", err)
+	}
+	t.Logf("Sum WASM (%d bytes): %x", len(wasmBytes), wasmBytes)
+
+	got := int64(execWASM(t, wasmBytes, "Sum", uint64(1), uint64(2), uint64(3)))
+	if got != 6 {
+		t.Errorf("Sum(1, 2, 3) = %d, want 6", got)
 	}
 }
 

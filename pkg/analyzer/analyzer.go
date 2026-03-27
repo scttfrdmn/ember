@@ -24,6 +24,13 @@ import (
 	"github.com/scttfrdmn/ember/core/ssa/walker"
 )
 
+// Package sets for I/O capability detection.
+var (
+	networkPkgs    = map[string]bool{"net": true, "net/http": true, "net/rpc": true, "net/smtp": true}
+	filesystemPkgs = map[string]bool{"os": true, "io/fs": true}
+	processPkgs    = map[string]bool{"os/exec": true, "syscall": true}
+)
+
 // Analyzer implements walker.Visitor and populates an intent.Manifest
 // from SSA analysis.
 //
@@ -106,9 +113,45 @@ func (a *Analyzer) VisitInstruction(instr ssa.Instruction) error {
 	case *ssa.TypeAssert:
 		// Type assertion requires runtime type metadata.
 		a.manifest.HasReflection = true
+
+	case *ssa.Call:
+		a.visitCall(v)
 	}
 
 	return nil
+}
+
+func (a *Analyzer) visitCall(v *ssa.Call) {
+	callee := v.Call.StaticCallee()
+	if callee == nil {
+		return // dynamic dispatch; can't statically determine package
+	}
+	pkg := callee.Package()
+	if pkg == nil {
+		return // builtin
+	}
+	path := pkg.Pkg.Path()
+	if networkPkgs[path] {
+		a.manifest.HasNetIO = true
+		a.addCapability(intent.Capability{Kind: "network"})
+	}
+	if filesystemPkgs[path] {
+		a.manifest.HasFileIO = true
+		a.addCapability(intent.Capability{Kind: "filesystem"})
+	}
+	if processPkgs[path] {
+		a.manifest.HasProcessIO = true
+		a.addCapability(intent.Capability{Kind: "process"})
+	}
+}
+
+func (a *Analyzer) addCapability(cap intent.Capability) {
+	for _, c := range a.manifest.Capabilities {
+		if c.Kind == cap.Kind {
+			return // already present
+		}
+	}
+	a.manifest.Capabilities = append(a.manifest.Capabilities, cap)
 }
 
 func (a *Analyzer) visitAlloc(v *ssa.Alloc) error {
