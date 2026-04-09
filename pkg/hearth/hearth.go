@@ -24,19 +24,19 @@ import (
 type Capabilities struct {
 	// MaxMemoryPages is the maximum WASM linear memory pages (64KB each)
 	// this hearth can allocate for an ember.
-	MaxMemoryPages uint32
+	MaxMemoryPages uint32 `json:"max_memory_pages"`
 
 	// Cores is the number of CPU cores available.
-	Cores int
+	Cores int `json:"cores"`
 
 	// HasNetwork reports whether this hearth can provide network access.
-	HasNetwork bool
+	HasNetwork bool `json:"has_network"`
 
 	// HasGPU reports whether this hearth has a GPU available.
-	HasGPU bool
+	HasGPU bool `json:"has_gpu"`
 
 	// Arch is the CPU architecture ("amd64", "arm64", etc.)
-	Arch string
+	Arch string `json:"arch"`
 }
 
 // Hearth is a minimal execution surface synthesizer.

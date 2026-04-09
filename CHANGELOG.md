@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-27
+
+### Added
+- `pkg/sdk`: high-level Go SDK — `Build(ctx, sourceDir)`, `Burn(ctx, artifact, fn, args)`, `Batch(ctx, jobs, concurrency)`
+  - `Artifact{WASM, Manifest, Exports}` — compiled ember ready for distribution or execution
+  - `ExportSig{Name, Params, Results, ParamNames}` — extracted from SSA before WASM encoding discards Go type names; supports Agenkit tool-spec generation
+  - `ParamType` enum (`Int`, `Float32`, `Float64`, `Bool`) — maps Go basic types for external consumers
+  - `Job` and `Result` types for batch execution
+  - `New()` and `NewWithCaps(hearth.Capabilities)` constructors; `Hearth()` accessor
+- `pkg/batch`: bounded-concurrency worker pool for parallel ember execution
+  - `Runner{SDK, MaxConcurrency}` with `New(sdk)` and `Run(ctx, jobs)`
+  - Results returned in submission order via indexed write; context cancellation skips pending jobs
+  - `MaxConcurrency <= 0` defaults to `runtime.NumCPU()`
+- `pkg/toolspec`: OpenAI + Anthropic LLM function-calling tool spec generator (Agenkit integration)
+  - `FromArtifact(a) ([]OpenAITool, error)` — one tool per `ExportSig`; JSON Schema types; param names from SSA
+  - `ToAnthropic(tools) []AnthropicTool` — repackages `parameters` as `input_schema`, drops `"type":"function"` wrapper
+  - `MarshalJSON(tools) ([]byte, error)` — pretty-printed JSON
+- `pkg/serve`: stdlib `net/http` server exposing the full pipeline over HTTP
+  - `New(sdk) *Server`; `NewWithMiddleware(sdk, mw)` for request logging; `Handler()` for testing
+  - `ListenAndServe(addr)` and `Shutdown(ctx)` for graceful termination
+  - `GET /health`, `GET /capabilities`, `POST /build`, `POST /burn`, `POST /batch`
+  - `POST /build` accepts base64 Go source; writes a minimal module to a temp dir; returns base64 WASM + manifest + exports
+  - `POST /burn` maps `ErrNotImplemented` → HTTP 400
+- `pkg/mesh`: distributed hearth mesh with capability routing (burstcore integration)
+  - `New() *Mesh` backed by local hearth fallback
+  - `AddNode(ctx, addr)` — probes `addr/capabilities`, registers healthy node
+  - `RemoveNode(addr)`, `Nodes()` — node management
+  - `Route(manifest)` — round-robin among healthy, capable nodes; returns `ErrNoCapableNode` if none qualify
+  - `Burn(ctx, wasm, manifest, fn, args)` — routes to remote node; falls back to local hearth on `ErrNoCapableNode`
+- `cmd/ember serve`: `--port`, `--max-memory-pages`, `--verbose` (request logging to stderr); SIGINT/SIGTERM graceful shutdown with 5s drain
+- `cmd/ember batch`: NDJSON stdin → NDJSON stdout; `--concurrency`, `--timeout`, `--format json|tsv`; Slurm-compatible; 1MB scanner buffer for large base64 payloads; exits 1 if any job fails
+
+### Changed
+- `pkg/hearth/hearth.go`: `Capabilities` struct gains JSON struct tags (non-breaking; required by `pkg/serve` and `pkg/mesh`)
+- `cmd/ember/main.go`: added `serve` and `batch` subcommands to switch and usage output
+
+### Unchanged
+- Zero new external dependencies — stdlib + `golang.org/x/tools` only
+- I/O-capable embers → `ErrNotImplemented` throughout (Phase 5)
+
 ## [0.4.0] - 2026-03-26
 
 ### Added
